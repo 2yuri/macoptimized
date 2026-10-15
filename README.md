@@ -31,9 +31,11 @@ Everything runs on your Mac. Nothing is uploaded, and there is no background age
 ## Preview
 
 <p align="center">
-  <img src="assets/care.png" width="32%" alt="care: review before cleaning" />
-  <img src="assets/free.png" width="32%" alt="free: memory, purgeable space and trash" />
-  <img src="assets/lens.png" width="32%" alt="lens: bubble map of disk usage" />
+  <img src="assets/lens.png" width="100%" alt="lens: bubble map of a folder next to the list of everything in it" />
+</p>
+<p align="center">
+  <img src="assets/care.png" width="49%" alt="care: everything that will be cleaned, reviewed before run" />
+  <img src="assets/free.png" width="49%" alt="free: memory, purgeable space and trash" />
 </p>
 
 <p align="center"><sub>care · free · lens. Dark, hairlines and type, nothing else.</sub></p>
