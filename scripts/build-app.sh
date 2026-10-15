@@ -2,7 +2,7 @@
 # Builds build/MacOptimized.app (release, ad-hoc signed).
 #
 #   VERSION=1.2.3      version written into Info.plist (default: latest git tag, without the "v")
-#   UNIVERSAL=1        build for Apple silicon and Intel (needs Xcode, not just the Command Line Tools)
+#   UNIVERSAL=1        build for Apple silicon and Intel
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -11,8 +11,15 @@ VERSION="${VERSION:-0.0.0}"
 APP=build/MacOptimized.app
 
 if [ "${UNIVERSAL:-0}" = "1" ]; then
-  swift build -c release --arch arm64 --arch x86_64
-  BINARY=.build/apple/Products/Release/MacOptimized
+  # One build per architecture, then lipo. (`--arch arm64 --arch x86_64` breaks on duplicate outputs.)
+  for ARCH in arm64 x86_64; do
+    swift build -c release --triple "$ARCH-apple-macosx14.0"
+  done
+  BINARY=build/MacOptimized-universal
+  mkdir -p build
+  lipo -create -output "$BINARY" \
+    .build/arm64-apple-macosx/release/MacOptimized \
+    .build/x86_64-apple-macosx/release/MacOptimized
 else
   swift build -c release
   BINARY=.build/release/MacOptimized

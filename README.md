@@ -60,8 +60,7 @@ open build/MacOptimized.app
 ./scripts/make-dmg.sh         # → build/MacOptimized-<version>.dmg
 ```
 
-`VERSION=1.2.3` sets the version (default: the latest git tag), `UNIVERSAL=1` builds for Apple silicon and Intel
-(needs Xcode).
+`VERSION=1.2.3` sets the version (default: the latest git tag), `UNIVERSAL=1` builds for Apple silicon and Intel.
 
 For development, `swift run` launches the app straight from the package.
 
