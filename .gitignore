@@ -1,0 +1,8 @@
+.build/
+build/
+.swiftpm/
+*.xcodeproj
+.DS_Store
+
+# Local research notes, not part of the open-source project
+docs/
