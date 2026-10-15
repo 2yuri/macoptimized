@@ -9,6 +9,8 @@ enum Theme {
     static let muted = Color(hex: 0xA3A3A9)
     static let line = Color(hex: 0x3A3A40)
     static let accent = Color(hex: 0x6FD6FF)
+    static let accentHover = Color(hex: 0x9BE3FF)
+    static let onAccent = Color(hex: 0x0A0A0B)
     static let danger = Color(hex: 0xFF6B6B)
     static let sheet = Color(hex: 0x111113)
     static let toast = Color(hex: 0x151517)

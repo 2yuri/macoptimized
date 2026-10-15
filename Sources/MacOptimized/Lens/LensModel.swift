@@ -14,7 +14,10 @@ final class LensModel: ObservableObject {
 
     @Published var phase: Phase = .idle
     @Published var root: FileNode?
-    @Published var current: FileNode?
+    /// The folder on screen. Its small files are listed on arrival, so everything in it can be seen and selected.
+    @Published var current: FileNode? {
+        didSet { if let current { DiskScanner.expandSmallFiles(of: current) } }
+    }
     @Published var selection: Set<FileNode> = []
     @Published var scannedBytes: Int64 = 0
     @Published var expectedBytes: Int64 = 0
@@ -27,9 +30,11 @@ final class LensModel: ObservableObject {
 
     static let maxBubbles = 30
 
-    /// Fraction of the volume scanned; nil when scanning a plain folder (its size isn't known up front).
+    /// Fraction of the volume scanned. nil for a plain folder (its size isn't known up front), and once
+    /// the scan passes the estimate: APFS clones are counted at full size, so a volume can hold more than it uses.
     var progress: Double? {
-        expectedBytes > 0 ? min(0.99, Double(scannedBytes) / Double(expectedBytes)) : nil
+        guard expectedBytes > 0, scannedBytes < expectedBytes else { return nil }
+        return Double(scannedBytes) / Double(expectedBytes)
     }
 
     var locations: [LensLocation] {
@@ -100,8 +105,13 @@ final class LensModel: ObservableObject {
     }
 
     func enter(_ node: FileNode) {
-        guard node.isDirectory, !node.children.isEmpty else { return }
+        guard node.canOpen else { return }
         current = node
+    }
+
+    /// Click: open a folder, select a file.
+    func activate(_ node: FileNode) {
+        if node.canOpen { enter(node) } else { toggle(node) }
     }
 
     func goUp() {

@@ -52,10 +52,10 @@ struct OnboardingView: View {
                 }
             }
             HStack {
-                ActionLink(title: "open settings") { FullDiskAccess.openSettings() }
+                PrimaryButton(title: "open settings") { FullDiskAccess.openSettings() }
                     .keyboardShortcut(.defaultAction)
                 Spacer()
-                TextButton(title: "continue without", color: Theme.muted, action: onSkip)
+                GhostButton(title: "continue without", action: onSkip)
             }
         }
         .padding(EdgeInsets(top: 40, leading: 120, bottom: 72, trailing: 120))

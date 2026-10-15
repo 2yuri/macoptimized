@@ -1,16 +1,26 @@
 #!/bin/sh
 # Builds build/MacOptimized.app (release, ad-hoc signed).
+#
+#   VERSION=1.2.3      version written into Info.plist (default: latest git tag, without the "v")
+#   UNIVERSAL=1        build for Apple silicon and Intel (needs Xcode, not just the Command Line Tools)
 set -eu
 cd "$(dirname "$0")/.."
 
-VERSION="0.0.1"
+VERSION="${VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)}"
+VERSION="${VERSION:-0.0.0}"
 APP=build/MacOptimized.app
 
-swift build -c release
+if [ "${UNIVERSAL:-0}" = "1" ]; then
+  swift build -c release --arch arm64 --arch x86_64
+  BINARY=.build/apple/Products/Release/MacOptimized
+else
+  swift build -c release
+  BINARY=.build/release/MacOptimized
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/MacOptimized "$APP/Contents/MacOS/MacOptimized"
+cp "$BINARY" "$APP/Contents/MacOS/MacOptimized"
 cp -R Resources/Fonts "$APP/Contents/Resources/Fonts"
 
 # App icon: Resources/AppIcon.png (1024×1024) → AppIcon.icns

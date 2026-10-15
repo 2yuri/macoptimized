@@ -84,7 +84,7 @@ struct CareView: View {
                 if running {
                     Text("don't quit apps while this runs").typeface(.monoSmall, Theme.muted)
                 } else {
-                    TextButton(title: "stop", hint: "esc", color: Theme.muted) { model.cancelScan() }
+                    GhostButton(title: "stop", hint: "esc") { model.cancelScan() }
                         .keyboardShortcut(.cancelAction)
                 }
             }
@@ -117,9 +117,9 @@ struct CareView: View {
                 Text(done ? model.summary : resultsContext).typeface(.mono, Theme.muted)
                 Spacer()
                 if done {
-                    ActionLink(title: "scan again") { model.scan() }
+                    PrimaryButton(title: "scan again") { model.scan() }
                 } else {
-                    ActionLink(title: "run") { confirming = true }
+                    PrimaryButton(title: "run") { confirming = true }
                         .keyboardShortcut(.defaultAction)
                 }
             }
@@ -254,7 +254,7 @@ private struct CategorySheet: View {
             HStack {
                 Text("\(group.rule.detail)  ·  right-click to reveal in Finder").typeface(.monoSmall, Theme.muted)
                 Spacer()
-                ActionLink(title: "done", action: onDone).keyboardShortcut(.defaultAction)
+                PrimaryButton(title: "done", action: onDone).keyboardShortcut(.defaultAction)
             }
         }
         .onExitCommand(perform: onDone)

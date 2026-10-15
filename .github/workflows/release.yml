@@ -1,0 +1,93 @@
+name: release
+
+# Builds a universal MacOptimized.app, packs it in a DMG and publishes a GitHub release.
+#
+#   - Push a tag:        git tag v0.1.0 && git push origin v0.1.0
+#   - Or run it by hand: Actions › release › Run workflow, type the version (the tag is created for you).
+#     Tick "dry run" to only build and test; the DMG is kept as a workflow artifact.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the v (e.g. 0.1.0)"
+        required: true
+      dry_run:
+        description: "Only build and test, don't publish"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          VERSION="${VERSION#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::'$VERSION' is not a semantic version"
+            exit 1
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" != "true" ] \
+             && git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::tag v$VERSION already exists"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Toolchain
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s /Applications/Xcode.app
+          swift --version
+
+      - name: Test
+        run: swift test
+
+      - name: Build DMG
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          UNIVERSAL: "1"
+        run: |
+          ./scripts/make-dmg.sh
+          lipo -archs build/MacOptimized.app/Contents/MacOS/MacOptimized
+          shasum -a 256 build/MacOptimized-*.dmg | tee build/SHA256SUMS.txt
+
+      - name: Keep DMG as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacOptimized-${{ steps.version.outputs.version }}
+          path: |
+            build/MacOptimized-*.dmg
+            build/SHA256SUMS.txt
+
+      - name: Publish release
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" build/MacOptimized-"$VERSION".dmg build/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "macoptimized $VERSION" \
+            --generate-notes \
+            --notes "Unsigned build: on first launch, right-click the app and choose Open. Grant Full Disk Access in System Settings › Privacy & Security."

@@ -182,21 +182,24 @@ final class CareModel: ObservableObject {
 
         Task {
             let groups = junk
-            let result = await Task.detached { [weak self] in
-                Self.remove(groups) { removed, path in
-                    Task { @MainActor in
-                        self?.removedSoFar = removed
-                        self?.progress = Double(removed) / Double(total)
-                        self?.currentPath = path
-                    }
+            // The remover reports very often; the UI samples the latest value a few times a second.
+            let latest = LatestProgress()
+            let ticker = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    let (bytes, path) = latest.value
+                    self?.removedSoFar = bytes
+                    self?.progress = min(1, Double(bytes) / Double(total))
+                    self?.currentPath = path
                 }
-            }.value
+            }
+            let result = await Task.detached { Self.remove(groups) { latest.set($0, $1) } }.value
+            ticker.invalidate()
             removedSoFar = result.freed
             for g in groups where g.isOn {
                 report.append(ReportLine(label: g.rule.title, value: Bytes.format(result.perGroup[g.id] ?? 0)))
             }
             if result.skippedCount > 0 {
-                skipped.append(ReportLine(label: "\(result.skippedCount) items in use or locked", value: Bytes.format(result.skippedSize), ok: false, note: "locked"))
+                skipped.append(ReportLine(label: "\(result.skippedCount) items partly in use or locked", value: Bytes.format(result.skippedSize), ok: false, note: "locked"))
             }
 
             activeModule = .maintenance
@@ -318,21 +321,35 @@ final class CareModel: ObservableObject {
     }
 
     /// Junk is deleted permanently; rules flagged `useTrash` go to the Trash instead.
-    nonisolated static func remove(_ groups: [JunkGroup], progress: (Int64, String) -> Void = { _, _ in }) -> RemovalResult {
-        let fm = FileManager.default
+    nonisolated static func remove(_ groups: [JunkGroup], progress: @escaping @Sendable (Int64, String) -> Void = { _, _ in }) -> RemovalResult {
         var result = RemovalResult()
         for g in groups {
             for item in g.items where g.selected.contains(item.url) {
                 guard isSafe(item.url) else { continue }
-                progress(result.freed, item.url.path.replacingOccurrences(of: JunkRules.home, with: "~"))
-                do {
-                    if g.rule.useTrash { try fm.trashItem(at: item.url, resultingItemURL: nil) }
-                    else { try fm.removeItem(at: item.url) }
-                    result.freed += item.size
-                    result.perGroup[g.id, default: 0] += item.size
-                } catch {
+                let label = item.url.path.replacingOccurrences(of: JunkRules.home, with: "~")
+                let base = result.freed
+                progress(base, label)
+
+                if g.rule.useTrash {
+                    if (try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)) != nil {
+                        result.freed += item.size
+                        result.perGroup[g.id, default: 0] += item.size
+                    } else {
+                        result.skippedCount += 1
+                        result.skippedSize += item.size
+                    }
+                    continue
+                }
+
+                // Permanent delete with live progress; files that are locked or in use stay behind.
+                let remover = TreeRemover()
+                remover.onProgress = { bytes in progress(base + bytes, label) }
+                remover.remove(item.url.path)
+                result.freed += remover.removed
+                result.perGroup[g.id, default: 0] += remover.removed
+                if remover.failures > 0 {
                     result.skippedCount += 1
-                    result.skippedSize += item.size
+                    result.skippedSize += max(0, item.size - remover.removed)
                 }
             }
         }
@@ -348,4 +365,14 @@ final class CareModel: ObservableObject {
         let inVolumeTrash = resolved.hasPrefix("/Volumes/") && resolved.contains("/.Trashes/")
         return (inHome || inVolumeTrash) && url.path != home
     }
+}
+
+/// Latest (bytes, path) pair written by a worker thread and read by the UI.
+private final class LatestProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes: Int64 = 0
+    private var path = ""
+
+    func set(_ bytes: Int64, _ path: String) { lock.withLock { self.bytes = bytes; self.path = path } }
+    var value: (Int64, String) { lock.withLock { (bytes, path) } }
 }

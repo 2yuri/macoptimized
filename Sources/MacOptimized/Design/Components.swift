@@ -1,44 +1,63 @@
 import SwiftUI
 
-/// The one call to action per screen: accent mono text, an arrow and an underline.
-struct ActionLink: View {
+/// The one call to action per screen: a filled accent pill with an arrow.
+struct PrimaryButton: View {
     let title: String
     var enabled = true
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Text(title).font(Fonts.mono(14, .semibold)).tracking(0.3)
-                Image(systemName: "arrow.right").font(.system(size: 12, weight: .medium))
+                Image(systemName: "arrow.right").font(.system(size: 12, weight: .semibold))
             }
-            .foregroundStyle(Theme.accent)
-            .padding(.bottom, 6)
-            .overlay(alignment: .bottom) { Rectangle().fill(Theme.accent).frame(height: Theme.hairline) }
-            .contentShape(Rectangle())
+            .foregroundStyle(Theme.onAccent)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 18)
+            .background(Capsule().fill(hovering && enabled ? Theme.accentHover : Theme.accent))
+            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.35)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 
-/// Plain mono text button ("cancel  esc", "stop  esc").
-struct TextButton: View {
+/// Secondary action: an outlined pill, optionally with its keyboard hint ("cancel  esc").
+struct GhostButton: View {
     let title: String
     var hint: String?
-    var color = Theme.text
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Text(title).typeface(.mono, color)
+            HStack(spacing: 10) {
+                Text(title).font(Fonts.mono(14, .medium)).tracking(0.3).foregroundStyle(Theme.text)
                 if let hint { Text(hint).typeface(.monoSmall, Theme.muted) }
             }
-            .contentShape(Rectangle())
+            .padding(.vertical, 10)
+            .padding(.horizontal, 18)
+            .background(Capsule().fill(.white.opacity(hovering ? 0.05 : 0)))
+            .overlay(Capsule().strokeBorder(hovering ? Theme.muted : Theme.line, lineWidth: Theme.hairline))
+            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+/// Shrinks slightly while pressed, so buttons feel physical.
+struct PressableStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
     }
 }
 
@@ -192,11 +211,11 @@ struct ModalActions: View {
     let onConfirm: () -> Void
 
     var body: some View {
-        HStack(spacing: 32) {
+        HStack(spacing: 16) {
             Spacer()
-            TextButton(title: "cancel", hint: "esc", color: Theme.muted, action: onCancel)
+            GhostButton(title: "cancel", hint: "esc", action: onCancel)
                 .keyboardShortcut(.cancelAction)
-            ActionLink(title: primary, action: onConfirm)
+            PrimaryButton(title: primary, action: onConfirm)
                 .keyboardShortcut(.defaultAction)
         }
     }
@@ -273,6 +292,7 @@ struct Ring: View {
 struct BubbleShape: View {
     let diameter: CGFloat
     var selected = false
+    var highlighted = false
 
     var body: some View {
         let k = max(0.35, min(1, diameter / 300))
@@ -290,7 +310,7 @@ struct BubbleShape: View {
                 .shadow(.inner(color: selected ? Theme.accent.opacity(0.25) : .white.opacity(0.15), radius: 11 * k, x: 6 * k, y: 8 * k))
                 .shadow(.inner(color: .black.opacity(0.7), radius: 15 * k, x: -10 * k, y: -14 * k))
             )
-            .overlay(Circle().strokeBorder(selected ? Theme.accent : .white.opacity(0.12), lineWidth: Theme.hairline))
+            .overlay(Circle().strokeBorder(selected ? Theme.accent : .white.opacity(highlighted ? 0.35 : 0.12), lineWidth: Theme.hairline))
             .shadow(color: selected ? Theme.accent.opacity(0.15) : .clear, radius: 12)
             .frame(width: diameter, height: diameter)
     }

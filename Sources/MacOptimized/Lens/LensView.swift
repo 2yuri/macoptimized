@@ -3,6 +3,9 @@ import SwiftUI
 struct LensView: View {
     @ObservedObject var model: LensModel
     @State private var confirming = false
+    @State private var hovered: FileNode?
+    /// First item that didn't get its own bubble; set when "others" is clicked so the list scrolls there.
+    @State private var revealed: FileNode?
 
     var body: some View {
         ZStack {
@@ -75,7 +78,7 @@ struct LensView: View {
             HStack {
                 Text("\(model.scanTarget)  ·  skipping /Volumes, /private/var/vm").typeface(.monoSmall, Theme.muted)
                 Spacer()
-                TextButton(title: "stop", hint: "esc", color: Theme.muted) { model.cancelScan() }.keyboardShortcut(.cancelAction)
+                GhostButton(title: "stop", hint: "esc") { model.cancelScan() }.keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 20)
@@ -86,30 +89,44 @@ struct LensView: View {
 
     private func map(_ current: FileNode) -> some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 16) {
+                GhostButton(title: "← up", hint: "esc") { model.goUp() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(current.parent == nil)
+                    .opacity(current.parent == nil ? 0.35 : 1)
                 breadcrumb(current)
                 Spacer()
                 Text(Bytes.format(current.size)).typeface(.mono)
-                TextButton(title: "new scan", color: Theme.muted) { model.reset() }.padding(.leading, 24)
+                GhostButton(title: "new scan") { model.reset() }
             }
-            BubbleMap(node: current, model: model)
+            .padding(.bottom, 8)
+
+            HStack(spacing: 32) {
+                BubbleMap(node: current, model: model, hovered: $hovered) {
+                    revealed = current.children.filter { $0.size > 0 }.dropFirst(LensModel.maxBubbles).first
+                }
+                ItemList(node: current, model: model, hovered: $hovered, revealed: $revealed)
+                    .frame(width: 360)
+            }
+
             VStack(spacing: 16) {
                 Hairline()
                 HStack {
                     HStack(spacing: 12) {
                         Dot(isOn: !model.selection.isEmpty)
-                        Text(model.selection.isEmpty ? "click a bubble to select it" : "\(model.selection.count) selected  ·  \(Bytes.format(model.selectedSize))")
-                            .typeface(.mono, model.selection.isEmpty ? Theme.muted : Theme.text)
+                        if !model.selection.isEmpty {
+                            Text("\(model.selection.count) selected  ·  \(Bytes.format(model.selectedSize))").typeface(.mono)
+                        }
+                        Text(model.selection.isEmpty ? "click a bubble to open it, use the dots to select. \"more\" lists the rest"
+                                                     : "·  click a bubble to open it, use the dots to select. \"more\" lists the rest")
+                            .typeface(.monoSmall, Theme.muted)
                     }
                     Spacer()
-                    ActionLink(title: "move to trash", enabled: !model.selection.isEmpty) { confirming = true }
+                    PrimaryButton(title: "move to trash", enabled: !model.selection.isEmpty) { confirming = true }
                 }
             }
         }
-        .padding(EdgeInsets(top: 16, leading: 40, bottom: 28, trailing: 40))
-        .background {
-            Button("") { model.goUp() }.keyboardShortcut(.cancelAction).hidden()
-        }
+        .padding(EdgeInsets(top: 12, leading: 40, bottom: 28, trailing: 40))
     }
 
     private func breadcrumb(_ current: FileNode) -> some View {
@@ -183,10 +200,13 @@ private struct LocationRow: View {
 }
 
 /// One level at a time: the current folder's children as packed bubbles,
-/// small ones merged into "others".
+/// small ones merged into "others". Clicking a folder opens it; clicking a file selects it.
 struct BubbleMap: View {
     let node: FileNode
     @ObservedObject var model: LensModel
+    @Binding var hovered: FileNode?
+    /// Clicking the "others" bubble.
+    var onOthers: () -> Void = {}
 
     private struct Bubble: Identifiable {
         let id: Int
@@ -199,9 +219,10 @@ struct BubbleMap: View {
     private var layout: (bubbles: [Bubble], bounds: CGRect) {
         let kids = node.children.filter { $0.size > 0 }
         let top = Array(kids.prefix(LensModel.maxBubbles))
-        let rest = kids.dropFirst(LensModel.maxBubbles).reduce(Int64(0)) { $0 + $1.size }
+        let rest = kids.dropFirst(LensModel.maxBubbles).reduce(node.looseSize) { $0 + $1.size }
         var items: [(FileNode?, String, Int64)] = top.map { ($0, $0.name, $0.size) }
-        if rest > 0 { items.append((nil, "others", rest)) }
+        let hidden = max(0, kids.count - LensModel.maxBubbles) + node.looseCount
+        if rest > 0 { items.append((nil, "\(hidden) more", rest)) }
         items.sort { $0.2 > $1.2 }
         guard !items.isEmpty else { return ([], .zero) }
         // Area proportional to size.
@@ -219,12 +240,11 @@ struct BubbleMap: View {
             let (bubbles, bounds) = layout
             let scale = bounds.width > 0 ? min(geo.size.width / bounds.width, geo.size.height / bounds.height) * 0.94 : 1
             ZStack {
-                Color.clear.contentShape(Rectangle()).onTapGesture(count: 2) { model.goUp() }
                 ForEach(bubbles) { b in
                     let d = max(4, b.circle.r * 2 * scale - 6)
                     let selected = b.node.map { model.selection.contains($0) } ?? false
                     ZStack {
-                        BubbleShape(diameter: d, selected: selected)
+                        BubbleShape(diameter: d, selected: selected, highlighted: b.node != nil && b.node === hovered)
                         if d > 68 {
                             VStack(spacing: 4) {
                                 Text(b.name).font(Fonts.inter(max(12, min(28, d / 10)), .regular))
@@ -237,12 +257,14 @@ struct BubbleMap: View {
                     }
                     .position(x: geo.size.width / 2 + (b.circle.x - bounds.midX) * scale,
                               y: geo.size.height / 2 + (b.circle.y - bounds.midY) * scale)
-                    .help("\(b.name) — \(Bytes.format(b.size))")
-                    .onTapGesture(count: 2) { if let n = b.node { model.enter(n) } }
-                    .onTapGesture { if let n = b.node { model.toggle(n) } }
+                    .help(b.node == nil ? "smaller items — click to see them in the list" : "\(b.name) — \(Bytes.format(b.size))")
+                    .onTapGesture { if let n = b.node { model.activate(n) } else { onOthers() } }
+                    .onHover { inside in
+                        if inside { hovered = b.node } else if hovered === b.node { hovered = nil }
+                    }
                     .contextMenu {
                         if let n = b.node {
-                            Button("Open") { model.enter(n) }.disabled(!n.isDirectory || n.children.isEmpty)
+                            Button("Open") { model.enter(n) }.disabled(!n.canOpen)
                             Button(model.selection.contains(n) ? "Deselect" : "Select") { model.toggle(n) }
                             Button("Reveal in Finder") { model.reveal(n) }
                             Button("Quick Look") { model.quickLook(n) }
@@ -253,5 +275,74 @@ struct BubbleMap: View {
             .animation(.spring(duration: 0.35), value: node.id)
         }
         .padding(.vertical, 8)
+    }
+}
+
+/// The current folder's items as a list, kept in sync with the bubbles on hover.
+private struct ItemList: View {
+    let node: FileNode
+    @ObservedObject var model: LensModel
+    @Binding var hovered: FileNode?
+    @Binding var revealed: FileNode?
+
+    var body: some View {
+        let items = node.children.filter { $0.size > 0 }
+        VStack(spacing: 0) {
+            HStack {
+                Text("in \(node.name.lowercased())").typeface(.monoSmall, Theme.muted)
+                Spacer()
+                Text("\(items.count) items").typeface(.monoSmall, Theme.muted)
+            }
+            .padding(.bottom, 10)
+            Hairline()
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(items) { item in row(item).id(item.id) }
+                    }
+                    .padding(.top, 6)
+                }
+                .onChange(of: revealed) { _, target in
+                    guard let target else { return }
+                    withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(target.id, anchor: .top) }
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                        if revealed === target { revealed = nil }
+                    }
+                }
+            }
+        }
+        .padding(.top, 16)
+    }
+
+    private func row(_ item: FileNode) -> some View {
+        let selected = model.selection.contains(item)
+        let isHovered = hovered === item || revealed === item
+        let opens = item.canOpen
+        return HStack(spacing: 14) {
+            Button { model.toggle(item) } label: { Dot(isOn: selected).padding(4).contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .padding(-4)
+            Text(item.name).typeface(.body).lineLimit(1).truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(Bytes.format(item.size)).typeface(.mono, selected ? Theme.accent : Theme.muted)
+            Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isHovered ? Theme.text : Theme.muted)
+                .frame(width: 14)
+                .opacity(opens ? 1 : 0)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(isHovered ? 0.04 : 0)))
+        .contentShape(Rectangle())
+        .onTapGesture { model.activate(item) }
+        .onHover { inside in
+            if inside { hovered = item } else if hovered === item { hovered = nil }
+        }
+        .contextMenu {
+            Button("Open") { model.enter(item) }.disabled(!opens)
+            Button(selected ? "Deselect" : "Select") { model.toggle(item) }
+            Button("Reveal in Finder") { model.reveal(item) }
+            Button("Quick Look") { model.quickLook(item) }
+        }
     }
 }

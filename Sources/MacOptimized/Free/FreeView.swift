@@ -120,9 +120,9 @@ struct FreeView: View {
             ]
         ) {
             if freeing {
-                TextButton(title: "stop", hint: "esc") { model.cancelRAM() }.keyboardShortcut(.cancelAction)
+                GhostButton(title: "stop", hint: "esc") { model.cancelRAM() }.keyboardShortcut(.cancelAction)
             } else {
-                ActionLink(title: "free up ram", enabled: model.job == nil) { model.freeRAM() }
+                PrimaryButton(title: "free up ram", enabled: model.job == nil) { model.freeRAM() }
             }
         }
     }
@@ -143,7 +143,7 @@ struct FreeView: View {
                 "via CacheDelete",
             ]
         ) {
-            ActionLink(title: "free up space", enabled: model.job == nil && PurgeableSpace.isSupported && (v?.purgeable ?? 0) > 0) {
+            PrimaryButton(title: "free up space", enabled: model.job == nil && PurgeableSpace.isSupported && (v?.purgeable ?? 0) > 0) {
                 model.freePurgeable()
             }
         }
@@ -161,7 +161,7 @@ struct FreeView: View {
             meter: meter,
             stats: stats.isEmpty ? ["~/.Trash  0 B"] : stats
         ) {
-            ActionLink(title: "empty trash", enabled: model.job == nil && !model.bins.isEmpty) { confirmingTrash = true }
+            PrimaryButton(title: "empty trash", enabled: model.job == nil && !model.bins.isEmpty) { confirmingTrash = true }
         }
     }
 

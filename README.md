@@ -9,9 +9,9 @@
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-0A0A0B?style=flat-square&logo=apple&logoColor=white)](#requirements)
 [![Swift 6](https://img.shields.io/badge/Swift-6-0A0A0B?style=flat-square&logo=swift&logoColor=6FD6FF)](Package.swift)
 [![License: MIT](https://img.shields.io/badge/license-MIT-0A0A0B?style=flat-square&labelColor=0A0A0B&color=6FD6FF)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.0.1-0A0A0B?style=flat-square&color=6FD6FF)
+[![Release](https://img.shields.io/github/v/release/2yuri/macoptimized?style=flat-square&color=6FD6FF&labelColor=0A0A0B)](https://github.com/2yuri/macoptimized/releases/latest)
 
-[Features](#features) · [Install](#build-and-run) · [Safety](#safety) · [Contributing](#contributing)
+[Download](#download) · [Features](#features) · [Build](#build-and-run) · [Safety](#safety) · [Contributing](#contributing)
 
 </div>
 
@@ -26,7 +26,7 @@
 Everything runs on your Mac. Nothing is uploaded, and there is no background agent or privileged helper.
 
 > [!WARNING]
-> Early release (v0.0.1). It is tested, but it deletes files. Read [Safety](#safety) before you press **run**.
+> Early release. It is tested, but it deletes files. Read [Safety](#safety) before you press **run**.
 
 ## Preview
 
@@ -37,6 +37,13 @@ Everything runs on your Mac. Nothing is uploaded, and there is no background age
 </p>
 
 <p align="center"><sub>care · free · lens. Dark, hairlines and type, nothing else.</sub></p>
+
+## Download
+
+Grab the latest `MacOptimized-x.y.z.dmg` from [Releases](https://github.com/2yuri/macoptimized/releases/latest),
+open it and drag **MacOptimized** to **Applications**. It runs on Apple silicon and Intel.
+
+The build isn't notarized yet, so the first time, right-click the app and choose **Open**.
 
 ## Requirements
 
@@ -50,7 +57,11 @@ git clone https://github.com/2yuri/macoptimized.git
 cd macoptimized
 ./scripts/build-app.sh        # release build → build/MacOptimized.app (ad-hoc signed)
 open build/MacOptimized.app
+./scripts/make-dmg.sh         # → build/MacOptimized-<version>.dmg
 ```
+
+`VERSION=1.2.3` sets the version (default: the latest git tag), `UNIVERSAL=1` builds for Apple silicon and Intel
+(needs Xcode).
 
 For development, `swift run` launches the app straight from the package.
 
@@ -130,6 +141,8 @@ Tests/MacOptimizedTests/   Swift Testing suite
 Resources/AppIcon.png      1024 px app icon (turned into .icns by the build script)
 Resources/Fonts/           Inter and JetBrains Mono (SIL Open Font License)
 scripts/build-app.sh       builds and ad-hoc signs build/MacOptimized.app
+scripts/make-dmg.sh        packs it into build/MacOptimized-<version>.dmg
+.github/workflows/         release pipeline
 ```
 
 ## Tests
@@ -154,6 +167,15 @@ the safety guard, memory and volume metrics, and the default selection of the ju
 - [ ] Live updates in lens via FSEvents
 - [ ] Age thresholds per cleanup category
 - [ ] Notarized release builds
+
+## Releasing
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) tests, builds a universal DMG and publishes a
+GitHub release with its SHA-256.
+
+- **From the terminal:** `git tag v0.1.0 && git push origin v0.1.0`
+- **From GitHub:** Actions › release › Run workflow, type the version; the tag is created for you.
+  Tick *dry run* to only build and test, with the DMG kept as a workflow artifact.
 
 ## Contributing
 
