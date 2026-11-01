@@ -5,4 +5,5 @@ build/
 .DS_Store
 
 # Local research notes, not part of the open-source project
-docs/
+docs/*
+!docs/RELEASING.md

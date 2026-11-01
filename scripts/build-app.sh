@@ -1,8 +1,11 @@
 #!/bin/sh
-# Builds build/MacOptimized.app (release, ad-hoc signed).
+# Builds build/MacOptimized.app (release, ad-hoc signed by default).
 #
 #   VERSION=1.2.3      version written into Info.plist (default: latest git tag, without the "v")
 #   UNIVERSAL=1        build for Apple silicon and Intel
+#   CODESIGN_IDENTITY="Developer ID Application"
+#                      sign with that keychain identity, hardened runtime and a secure timestamp
+#                      (ready for notarization) instead of ad-hoc
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -58,5 +61,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP"
+if [ -n "${CODESIGN_IDENTITY:-}" ] && [ "$CODESIGN_IDENTITY" != "-" ]; then
+  # The bundle has a single Mach-O (Contents/MacOS/MacOptimized); signing the bundle signs it.
+  # No entitlements: nothing in the app needs a hardened-runtime exception.
+  codesign --force --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
+else
+  codesign --force --sign - "$APP"
+fi
 echo "Built $APP ($VERSION)"
