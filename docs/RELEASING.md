@@ -40,8 +40,8 @@ so a half-configured repository never publishes an unsigned build by accident.
 ## One-time setup: repository secrets
 
 Settings › Secrets and variables › Actions › **New repository secret**. The same five secrets are
-used by the owner's other repositories, so they can also be set once as organization or account-wide
-secrets and shared.
+used by the owner's other repositories. Personal accounts have no account-wide Actions secrets, so set
+them on each repository (the `gh secret set` loop below does all of them at once).
 
 | Secret | Value |
 |---|---|
@@ -84,6 +84,22 @@ exportable one if you have it):
 
    plus `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID`.
 4. Delete the `.p8` from disk. Revoke the key in App Store Connect if it ever leaks.
+
+### Setting them from the terminal
+
+With `developer-id.p12` and `AuthKey_XXXXXXXXXX.p8` in the current folder, this sets all five on every
+repository listed (it prompts for the `.p12` password, Key ID and Issuer ID without echoing them to
+the shell history):
+
+```sh
+for REPO in 2yuri/macoptimized 2yuri/cmdtab; do
+  base64 -i developer-id.p12          | gh secret set DEVELOPER_ID_P12_BASE64 -R "$REPO"
+  base64 -i AuthKey_XXXXXXXXXX.p8     | gh secret set NOTARY_KEY_P8_BASE64    -R "$REPO"
+  gh secret set DEVELOPER_ID_P12_PASSWORD -R "$REPO"
+  gh secret set NOTARY_KEY_ID             -R "$REPO"
+  gh secret set NOTARY_ISSUER_ID          -R "$REPO"
+done
+```
 
 After adding the secrets, run the workflow once with **dry run** ticked to confirm signing and
 notarization pass before tagging a real release.
