@@ -45,7 +45,8 @@ Everything runs on your Mac. Nothing is uploaded, and there is no background age
 Grab the latest `MacOptimized-x.y.z.dmg` from [Releases](https://github.com/2yuri/macoptimized/releases/latest),
 open it and drag **MacOptimized** to **Applications**. It runs on Apple silicon and Intel.
 
-The build isn't notarized yet, so the first time, right-click the app and choose **Open**.
+Releases are signed with a Developer ID and notarized by Apple once signing is enabled for the repository. If a
+release says it is unsigned, right-click the app the first time and choose **Open**.
 
 ## Requirements
 
@@ -143,6 +144,7 @@ Resources/AppIcon.png      1024 px app icon (turned into .icns by the build scri
 Resources/Fonts/           Inter and JetBrains Mono (SIL Open Font License)
 scripts/build-app.sh       builds and ad-hoc signs build/MacOptimized.app
 scripts/make-dmg.sh        packs it into build/MacOptimized-<version>.dmg
+scripts/notarize.sh        submits a build to Apple's notary service (used by the release workflow)
 .github/workflows/         release pipeline
 ```
 
@@ -172,7 +174,8 @@ the safety guard, memory and volume metrics, and the default selection of the ju
 ## Releasing
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) tests, builds a universal DMG and publishes a
-GitHub release with its SHA-256.
+GitHub release with its SHA-256. With the signing secrets configured it also signs the app and the DMG with a
+Developer ID, notarizes and staples them; see [docs/RELEASING.md](docs/RELEASING.md).
 
 - **From the terminal:** `git tag v0.1.0 && git push origin v0.1.0`
 - **From GitHub:** Actions › release › Run workflow, type the version; the tag is created for you.

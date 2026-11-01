@@ -5,6 +5,10 @@ name: release
 #   - Push a tag:        git tag v0.1.0 && git push origin v0.1.0
 #   - Or run it by hand: Actions › release › Run workflow, type the version (the tag is created for you).
 #     Tick "dry run" to only build and test; the DMG is kept as a workflow artifact.
+#
+# With the signing secrets set (see docs/RELEASING.md) the app and the DMG are signed with the
+# Developer ID Application certificate, notarized and stapled. Without them (forks, or before the
+# secrets exist) the build is ad-hoc signed exactly as before and a warning says so.
 
 on:
   push:
@@ -29,7 +33,10 @@ concurrency:
 jobs:
   release:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      TEAM_ID: RQTYDUV329
+      CODESIGN_IDENTITY_NAME: Developer ID Application
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,14 +70,124 @@ jobs:
       - name: Test
         run: swift test
 
-      - name: Build DMG
+      # Secrets (Settings › Secrets and variables › Actions), all five or none:
+      #   DEVELOPER_ID_P12_BASE64   base64 of the exported "Developer ID Application" certificate (.p12)
+      #   DEVELOPER_ID_P12_PASSWORD password chosen when exporting the .p12
+      #   NOTARY_KEY_P8_BASE64      base64 of the App Store Connect API key (.p8)
+      #   NOTARY_KEY_ID             its Key ID
+      #   NOTARY_ISSUER_ID          the Issuer ID shown above the keys list
+      - name: Check signing secrets
+        id: signing
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          MISSING=""
+          for NAME in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD NOTARY_KEY_P8_BASE64 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
+            [ -n "$(printenv "$NAME")" ] || MISSING="$MISSING $NAME"
+          done
+          if [ -z "$MISSING" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Signing secrets found: the macOS build will be signed and notarized."
+          elif [ "$(echo "$MISSING" | wc -w)" -eq 5 ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Unsigned macOS build::Signing secrets are not configured, so MacOptimized.app and the DMG are ad-hoc signed and not notarized. Gatekeeper will warn on first launch. See docs/RELEASING.md."
+          else
+            echo "::error title=Incomplete signing secrets::Missing:$MISSING. Set all five signing secrets or none (see docs/RELEASING.md)."
+            exit 1
+          fi
+
+      - name: Import signing certificate and notary key
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/developer-id.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep -q "$CODESIGN_IDENTITY_NAME" \
+            || { echo "::error::No '$CODESIGN_IDENTITY_NAME' identity in the imported .p12"; exit 1; }
+
+          echo "$KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          chmod 600 "$RUNNER_TEMP/notary.p8"
+          echo "CODESIGN_IDENTITY=$CODESIGN_IDENTITY_NAME" >> "$GITHUB_ENV"
+
+      - name: Build app
         env:
           VERSION: ${{ steps.version.outputs.version }}
           UNIVERSAL: "1"
         run: |
-          ./scripts/make-dmg.sh
+          ./scripts/build-app.sh
           lipo -archs build/MacOptimized.app/Contents/MacOS/MacOptimized
-          shasum -a 256 build/MacOptimized-*.dmg | tee build/SHA256SUMS.txt
+
+      - name: Notarize and staple the app
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          NOTARY_KEY_PATH: ${{ runner.temp }}/notary.p8
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          ditto -c -k --keepParent build/MacOptimized.app build/MacOptimized-notarize.zip
+          ./scripts/notarize.sh build/MacOptimized-notarize.zip
+          rm build/MacOptimized-notarize.zip
+          xcrun stapler staple build/MacOptimized.app
+          xcrun stapler validate build/MacOptimized.app
+
+      - name: Build DMG
+        env:
+          SKIP_APP_BUILD: "1"
+        run: ./scripts/make-dmg.sh
+
+      - name: Notarize and staple the DMG
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          NOTARY_KEY_PATH: ${{ runner.temp }}/notary.p8
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          DMG=$(ls build/MacOptimized-*.dmg)
+          ./scripts/notarize.sh "$DMG"
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+
+      - name: Verify signatures
+        if: steps.signing.outputs.signed == 'true'
+        run: |
+          APP=build/MacOptimized.app
+          DMG=$(ls build/MacOptimized-*.dmg)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --strict --verbose=2 "$DMG"
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee build/codesign.txt
+          grep -q "^TeamIdentifier=$TEAM_ID$" build/codesign.txt || { echo "::error::app is not signed by team $TEAM_ID"; exit 1; }
+          grep -q "flags=.*runtime" build/codesign.txt || { echo "::error::app is not signed with the hardened runtime"; exit 1; }
+          grep -q "^Timestamp=" build/codesign.txt || { echo "::error::app signature has no secure timestamp"; exit 1; }
+          rm build/codesign.txt
+          spctl --assess --type execute --verbose=2 "$APP"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+
+          # Check the copy users actually get: the app inside the DMG.
+          MOUNT=$(mktemp -d)
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
+          codesign --verify --deep --strict --verbose=2 "$MOUNT/MacOptimized.app"
+          spctl --assess --type execute --verbose=2 "$MOUNT/MacOptimized.app"
+          xcrun stapler validate "$MOUNT/MacOptimized.app"
+          hdiutil detach "$MOUNT" >/dev/null
+
+      - name: Checksums
+        run: shasum -a 256 build/MacOptimized-*.dmg | tee build/SHA256SUMS.txt
 
       - name: Keep DMG as artifact
         uses: actions/upload-artifact@v4
@@ -85,9 +202,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
+          SIGNED: ${{ steps.signing.outputs.signed }}
         run: |
+          if [ "$SIGNED" = "true" ]; then
+            NOTES="Signed with Developer ID and notarized by Apple. Grant Full Disk Access in System Settings › Privacy & Security."
+          else
+            NOTES="Unsigned build: on first launch, right-click the app and choose Open. Grant Full Disk Access in System Settings › Privacy & Security."
+          fi
           gh release create "v$VERSION" build/MacOptimized-"$VERSION".dmg build/SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "macoptimized $VERSION" \
             --generate-notes \
-            --notes "Unsigned build: on first launch, right-click the app and choose Open. Grant Full Disk Access in System Settings › Privacy & Security."
+            --notes "$NOTES"
+
+      - name: Remove the temporary keychain and notary key
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/developer-id.p12"
+          if [ -f "$RUNNER_TEMP/signing.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          fi
